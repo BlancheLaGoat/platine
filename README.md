@@ -34,6 +34,7 @@ Les applis desktop officielles plantent, rament ou ne gardent pas la qualité ma
   <img src="docs/overlay.png" width="520" alt="Overlay OBS">
 
 - **Discord** : affiche « Écoute… » sur ton profil, avec la pochette et le temps restant, quelle que soit la plateforme.
+- **Playlists** (`Ctrl + Maj + L`) : toutes tes playlists Tidal et Spotify au même endroit, avec un bouton **Transférer vers…** (une, plusieurs ou toutes d'un coup) et une **sauvegarde** dans un fichier. Les titres sont retrouvés par leur code ISRC, puis par titre / artiste / durée ; un rapport liste ceux qui n'existent pas sur l'autre plateforme. Platine ne supprime jamais rien.
 - **Touches multimédia** du clavier et contrôles de Windows.
 - **Mises à jour automatiques** depuis les Releases GitHub.
 - **Lancement au démarrage de Windows**, réduit dans la zone de notification.
@@ -64,6 +65,16 @@ Options à ajouter à la fin du lien :
 
 Les options se combinent : `…/overlay?accent=00e5ff&pause=show`. L'état brut est aussi disponible en JSON sur `http://127.0.0.1:4848/now`. Le serveur n'écoute que sur ton PC, rien n'est accessible depuis le réseau.
 
+## Playlists : connecter Tidal et Spotify
+
+Platine passe par les API officielles : il faut une « appli développeur » (gratuite) sur chaque plateforme, une seule fois.
+
+1. **Tidal** : [developer.tidal.com/dashboard](https://developer.tidal.com/dashboard) → crée une appli → dans ses réglages, ajoute l'adresse de redirection `http://127.0.0.1:4849/callback` (et si le portail propose de choisir des droits, coche *playlists*, *collection*, *search* et *user*) → copie le **Client ID**.
+2. **Spotify** : [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → *Create app* → API : *Web API* → adresse de redirection `http://127.0.0.1:4849/callback` → copie le **Client ID**. Spotify exige que le compte qui crée l'appli ait **Premium**.
+3. Colle les deux ID dans `src/config.js` (`TIDAL_CLIENT_ID`, `SPOTIFY_CLIENT_ID`), puis dans Platine : **Playlists → Connecter**. La connexion s'ouvre dans ton navigateur habituel.
+
+Limites connues : Spotify ne donne accès qu'au contenu de **tes** playlists (pas celles que tu suis), et une poignée de titres peuvent manquer d'une plateforme à l'autre (exclusivités, versions régionales) — ils sont listés dans le rapport.
+
 ## Questions fréquentes
 
 **La connexion Google est refusée.** Google bloque volontairement sa connexion dans les applis qui embarquent un navigateur. Connecte-toi par e-mail + mot de passe (crée un mot de passe avec « Mot de passe oublié » si besoin). Pour YouTube Music, ça peut rester bloqué.
@@ -85,6 +96,7 @@ npm start
 - `npm run dist` construit l'installeur dans `dist/`, signé automatiquement par Castlabs (compte EVS gratuit : `pip install castlabs-evs` puis `python -m castlabs_evs.account signup`).
 - **Ajouter une plateforme** : une entrée dans `src/platforms.js` (nom, couleurs, URL du lecteur web, domaines).
 - **Discord** : mets l'*Application ID* de ton appli Discord dans `src/config.js`.
+- **Playlists** : les connecteurs sont dans `src/connectors/` (un fichier par plateforme + `match.js` pour la correspondance des titres). Les jetons sont chiffrés par Windows (`safeStorage`) dans le dossier de données de Platine.
 - **Publier une version** : change `"version"` dans `package.json`, commit, push, puis tag `vX.Y.Z`. Le workflow GitHub Actions (secrets `EVS_ACCOUNT` / `EVS_PASSWD`) construit, signe et publie la Release ; les Platine installés se mettent à jour tout seuls.
 - **Mettre à jour Chrome** : change la version Castlabs aux deux endroits de `package.json` (`devDependencies.electron` et `build.electronDownload.version`).
 

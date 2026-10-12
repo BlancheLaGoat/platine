@@ -11,6 +11,9 @@ const PLATFORMS = require('./platforms');
 const discord = require('./discord');
 const overlay = require('./overlay-server');
 const { OVERLAY_PORT } = require('./config');
+const accounts = require('./connectors/accounts');
+const services = require('./connectors');
+const transfer = require('./transfer');
 const OVERLAY_URL = `http://127.0.0.1:${OVERLAY_PORT}/overlay`;
 
 const CHROME_UA =
@@ -26,6 +29,7 @@ const logFile = () => path.join(app.getPath('userData'), 'crash.log');
 let win = null;
 let current = null;           // id de la plateforme affichée, ou null = écran de choix
 let mini = null;              // fenêtre du mini-lecteur
+let playlistsWin = null;      // fenêtre Playlists
 let pollTimer = null;
 let nowPlaying = { title: null, playing: false };
 let tray = null;
@@ -146,6 +150,7 @@ function wireWindow(w, p) {
     const k = input.key.toLowerCase();
     if (k === 'p') { e.preventDefault(); open(null); }
     if (k === 'm' && p) { e.preventDefault(); toggleMini(); }
+    if (k === 'l') { e.preventDefault(); openPlaylists(); }
   });
 
   w.on('close', e => {
@@ -285,6 +290,91 @@ ipcMain.on('mini-action', async (_e, action) => {
 });
 
 // ------------------------------------------------------------------
+// Fenêtre Playlists : lire, transférer, sauvegarder
+// ------------------------------------------------------------------
+function openPlaylists() {
+  if (playlistsWin && !playlistsWin.isDestroyed()) { playlistsWin.show(); playlistsWin.focus(); return; }
+  playlistsWin = new BrowserWindow({
+    width: 1000, height: 720, minWidth: 720, minHeight: 480,
+    backgroundColor: '#0b0b0d', title: 'Playlists — Platine', icon: ICON, autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'playlists-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  playlistsWin.loadFile(path.join(__dirname, 'playlists.html'));
+  playlistsWin.on('close', e => {
+    if (transfer.isRunning()) {
+      const r = dialog.showMessageBoxSync(playlistsWin, {
+        type: 'warning', buttons: ['Continuer le transfert', 'Annuler et fermer'], defaultId: 0, cancelId: 0,
+        message: 'Un transfert est en cours.', detail: 'Si tu fermes, il sera annulé (les playlists déjà créées restent).',
+      });
+      if (r === 0) { e.preventDefault(); return; }
+      transfer.cancel();
+    }
+  });
+  playlistsWin.on('closed', () => { playlistsWin = null; });
+}
+
+const safely = fn => async (...args) => {
+  try { return { ok: true, ...(await fn(...args)) }; }
+  catch (e) { log(`[playlists] ${e && e.stack || e}`); return { ok: false, error: (e && e.message) || String(e) }; }
+};
+const stamp = () => new Date().toISOString().slice(0, 10);
+
+ipcMain.handle('pl:services', () => services.list());
+ipcMain.handle('pl:connect', safely(async (_e, id) => {
+  await services.connect(id, url => shell.openExternal(url));
+  if (playlistsWin && !playlistsWin.isDestroyed()) { playlistsWin.show(); playlistsWin.focus(); }
+  return {};
+}));
+ipcMain.handle('pl:disconnect', (_e, id) => { services.disconnect(id); return { ok: true }; });
+ipcMain.handle('pl:list', safely(async (_e, id) => ({ playlists: await services.connector(id).listPlaylists() })));
+ipcMain.handle('pl:openPortal', (_e, id) => { const s = services.SERVICES[id]; if (s) shell.openExternal(s.devPortal); });
+ipcMain.handle('pl:cancel', () => transfer.cancel());
+
+ipcMain.handle('pl:transfer', safely(async (e, job) => {
+  const send = p => { if (!e.sender.isDestroyed()) e.sender.send('pl:progress', p); };
+  const report = await transfer.transfer(job, send);
+  log(`[playlists] transfert ${report.from} -> ${report.to} : ${report.playlists.length} playlist(s)${report.error ? ' — ' + report.error : ''}`);
+  return { report };
+}));
+
+ipcMain.handle('pl:backup', safely(async (e, id) => {
+  const send = p => { if (!e.sender.isDestroyed()) e.sender.send('pl:backup-progress', p); };
+  const data = await transfer.backup(id, send);
+  const name = services.SERVICES[id].name;
+  const { canceled, filePath } = await dialog.showSaveDialog(playlistsWin, {
+    title: 'Enregistrer la sauvegarde',
+    defaultPath: path.join(app.getPath('documents'), `Platine - playlists ${name} ${stamp()}.json`),
+    filters: [{ name: 'Sauvegarde Platine', extensions: ['json'] }],
+  });
+  if (canceled || !filePath) return { cancelled: true };
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(filePath.replace(/\.json$/i, '') + '.csv', transfer.toCsv(data), 'utf8');
+  return {
+    path: filePath,
+    playlists: data.playlists.length,
+    tracks: data.playlists.reduce((a, p) => a + p.tracks.length, 0),
+  };
+}));
+
+ipcMain.handle('pl:saveReport', safely(async (_e, report) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(playlistsWin, {
+    title: 'Enregistrer le rapport',
+    defaultPath: path.join(app.getPath('documents'), `Platine - transfert ${report.from} vers ${report.to} ${stamp()}.txt`),
+    filters: [{ name: 'Texte', extensions: ['txt'] }],
+  });
+  if (canceled || !filePath) return { cancelled: true };
+  const lines = [`Transfert ${report.from} → ${report.to} (${new Date(report.date).toLocaleString('fr-FR')})`, ''];
+  if (report.error) lines.push(`Interrompu : ${report.error}`, '');
+  for (const p of report.playlists) {
+    lines.push(`■ ${p.name} — ${p.found}/${p.total} titres retrouvés${p.created ? '' : ' (playlist non créée)'}`);
+    for (const m of p.missing) lines.push(`    ✕ ${m.title} — ${(m.artists || []).join(', ')}${m.album ? ` [${m.album}]` : ''}`);
+    lines.push('');
+  }
+  fs.writeFileSync(filePath, '\uFEFF' + lines.join('\r\n'), 'utf8');
+  return { path: filePath };
+}));
+
+// ------------------------------------------------------------------
 // Discord + overlay OBS
 // ------------------------------------------------------------------
 function setDiscord(on) {
@@ -367,6 +457,7 @@ function buildTrayMenu() {
   tray.setToolTip(current ? `Platine — ${byId(current).name}` : 'Platine');
   const template = [
     { label: 'Afficher', click: showWin },
+    { label: 'Playlists…', accelerator: 'Ctrl+Shift+L', click: openPlaylists },
     { label: 'Mini-lecteur', type: 'checkbox', checked: miniOpen(), enabled: !!current, accelerator: 'Ctrl+Shift+M', click: toggleMini },
     {
       label: 'Plateforme',
@@ -460,6 +551,7 @@ if (!app.requestSingleInstanceLock()) {
     open(byId(state.platform) ? state.platform : null);
     setupUpdater();
 
+    accounts.init({ dir: app.getPath('userData'), safeStorage: require('electron').safeStorage });
     discord.setLogger(log);
     overlay.setLogger(log);
     if (state.discord === undefined) state.discord = discord.available(); // activé par défaut si l'ID est rempli
