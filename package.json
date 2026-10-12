@@ -1,7 +1,7 @@
 {
   "name": "platine",
   "productName": "Platine",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Toutes tes plateformes de musique (Tidal, Spotify, Deezer…) dans une appli desktop stable, qualité max (Widevine).",
   "main": "src/main.js",
   "author": "BlancheLaGoat",
@@ -57,6 +57,7 @@
     ]
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "@xhayper/discord-rpc": "^1.5.1"
   }
 }

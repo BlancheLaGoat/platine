@@ -3,11 +3,15 @@
 // Si une page crashe ou fige, elle se relance toute seule là où tu étais.
 
 const {
-  app, components, BrowserWindow, Tray, Menu, nativeImage, shell, session, ipcMain, dialog, screen,
+  app, components, BrowserWindow, Tray, Menu, nativeImage, shell, session, ipcMain, dialog, screen, clipboard,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const PLATFORMS = require('./platforms');
+const discord = require('./discord');
+const overlay = require('./overlay-server');
+const { OVERLAY_PORT } = require('./config');
+const OVERLAY_URL = `http://127.0.0.1:${OVERLAY_PORT}/overlay`;
 
 const CHROME_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
@@ -22,7 +26,8 @@ const logFile = () => path.join(app.getPath('userData'), 'crash.log');
 let win = null;
 let current = null;           // id de la plateforme affichée, ou null = écran de choix
 let mini = null;              // fenêtre du mini-lecteur
-let miniTimer = null;
+let pollTimer = null;
+let nowPlaying = { title: null, playing: false };
 let tray = null;
 let quitting = false;
 let startHidden = process.argv.includes('--hidden'); // lancé par Windows au démarrage
@@ -210,7 +215,7 @@ function toggleMini() {
   if (miniOpen()) return closeMini(true);
   if (!current) return; // rien à contrôler sur l'écran de choix
 
-  const W = 380, H = 112;
+  const W = 380, H = 120;
   const area = screen.getPrimaryDisplay().workArea;
   const pos = state.mini || { x: area.x + area.width - W - 24, y: area.y + area.height - H - 24 };
 
@@ -225,12 +230,10 @@ function toggleMini() {
   mini.loadFile(path.join(__dirname, 'mini.html'));
   mini.once('ready-to-show', () => mini.showInactive());
   mini.on('moved', saveState);
-  mini.on('closed', () => { mini = null; clearInterval(miniTimer); buildTrayMenu(); });
+  mini.on('closed', () => { mini = null; buildTrayMenu(); });
+  mini.webContents.once('did-finish-load', () => sendToMini(nowPlaying));
 
   if (win && !win.isDestroyed()) win.hide();
-  clearInterval(miniTimer);
-  miniTimer = setInterval(pushMiniState, 700);
-  pushMiniState();
   buildTrayMenu();
 }
 
@@ -239,8 +242,11 @@ function closeMini(showMain) {
   if (showMain) showWin();
 }
 
-async function pushMiniState() {
-  if (!miniOpen()) return;
+// ------------------------------------------------------------------
+// Suivi de la lecture : une seule lecture par seconde, partagée entre
+// le mini-lecteur, Discord et l'overlay OBS.
+// ------------------------------------------------------------------
+async function poll() {
   const p = current && byId(current);
   let s = null;
   try {
@@ -248,11 +254,24 @@ async function pushMiniState() {
       s = await win.webContents.executeJavaScript('window.__platine ? window.__platine.state() : null', true);
     }
   } catch {}
-  if (!miniOpen()) return;
-  mini.webContents.send('mini-state', {
+  nowPlaying = {
+    title: null, artist: null, album: null, art: null, playing: false, position: null, duration: null,
     ...(s || {}),
-    platform: p ? { name: p.name, accent: p.accent, color: p.color } : null,
-  });
+    platform: p ? { id: p.id, name: p.name, accent: p.accent, color: p.color } : null,
+  };
+  sendToMini(nowPlaying);
+  discord.update(nowPlaying);
+  overlay.update(nowPlaying);
+}
+
+function sendToMini(np) {
+  if (miniOpen() && !mini.webContents.isLoading()) mini.webContents.send('mini-state', np);
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 1000);
+  poll();
 }
 
 ipcMain.on('mini-action', async (_e, action) => {
@@ -262,8 +281,37 @@ ipcMain.on('mini-action', async (_e, action) => {
   try {
     await win.webContents.executeJavaScript(`window.__platine && window.__platine.action(${JSON.stringify(action)})`, true);
   } catch {}
-  setTimeout(pushMiniState, 150);
+  setTimeout(poll, 150);
 });
+
+// ------------------------------------------------------------------
+// Discord + overlay OBS
+// ------------------------------------------------------------------
+function setDiscord(on) {
+  state.discord = on;
+  discord.setEnabled(on);
+  saveState();
+  buildTrayMenu();
+}
+
+async function setOverlay(on) {
+  state.overlay = on;
+  if (on) {
+    const ok = await overlay.start(OVERLAY_PORT);
+    if (!ok) {
+      state.overlay = false;
+      dialog.showMessageBox({
+        type: 'warning', title: 'Platine',
+        message: `L'overlay OBS n'a pas pu démarrer : le port ${OVERLAY_PORT} est déjà utilisé.`,
+        detail: 'Change OVERLAY_PORT dans src/config.js, ou ferme le programme qui utilise ce port.',
+      });
+    }
+  } else {
+    overlay.stop();
+  }
+  saveState();
+  buildTrayMenu();
+}
 
 // ------------------------------------------------------------------
 // Démarrage avec Windows
@@ -341,6 +389,22 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     {
+      label: discord.available() ? 'Afficher sur Discord' : 'Afficher sur Discord (ID à remplir dans config.js)',
+      type: 'checkbox',
+      checked: !!state.discord && discord.available(),
+      enabled: discord.available(),
+      click: item => setDiscord(item.checked),
+    },
+    {
+      label: 'Overlay OBS',
+      submenu: [
+        { label: 'Activé', type: 'checkbox', checked: overlay.running(), click: item => setOverlay(item.checked) },
+        { label: 'Copier le lien pour OBS', enabled: overlay.running(), click: () => clipboard.writeText(OVERLAY_URL) },
+        { label: 'Aperçu dans le navigateur', enabled: overlay.running(), click: () => shell.openExternal(`${OVERLAY_URL}?pause=show`) },
+      ],
+    },
+    { type: 'separator' },
+    {
       label: 'Lancer au démarrage de Windows',
       type: 'checkbox',
       checked: app.isPackaged && startsWithWindows(),
@@ -395,9 +459,17 @@ if (!app.requestSingleInstanceLock()) {
     // Premier lancement => écran de choix ; ensuite on rouvre la dernière plateforme.
     open(byId(state.platform) ? state.platform : null);
     setupUpdater();
+
+    discord.setLogger(log);
+    overlay.setLogger(log);
+    if (state.discord === undefined) state.discord = discord.available(); // activé par défaut si l'ID est rempli
+    if (state.discord && discord.available()) discord.setEnabled(true);
+    if (state.overlay) await setOverlay(true);
+    startPolling();
+    buildTrayMenu();
   }).catch(err => log(`Erreur au démarrage : ${err}`));
 
-  app.on('before-quit', () => { quitting = true; saveState(); });
+  app.on('before-quit', () => { quitting = true; saveState(); discord.setEnabled(false); overlay.stop(); });
   app.on('window-all-closed', () => {}); // on reste dans la zone de notif
 }
 
