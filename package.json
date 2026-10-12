@@ -45,7 +45,7 @@
     },
     "electronDownload": {
       "version": "44.5.1+wvcus",
-      "mirror": "https://github.com/castlabs/electron-releases/releases/download/v"
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
     }
   }
 }
