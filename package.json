@@ -1,7 +1,7 @@
 {
   "name": "platine",
   "productName": "Platine",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Toutes tes plateformes de musique (Tidal, Spotify, Deezer…) dans une appli desktop stable, qualité max (Widevine).",
   "main": "src/main.js",
   "author": "BlancheLaGoat",
@@ -41,11 +41,22 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "electronDownload": {
       "version": "44.5.1+wvcus",
       "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "BlancheLaGoat",
+        "repo": "platine"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

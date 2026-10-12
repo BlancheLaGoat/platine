@@ -2,7 +2,9 @@
 // Build Electron Castlabs = Widevine => qualité max. Une session séparée par plateforme : tu restes connecté partout.
 // Si une page crashe ou fige, elle se relance toute seule là où tu étais.
 
-const { app, components, BrowserWindow, Tray, Menu, nativeImage, shell, session, ipcMain } = require('electron');
+const {
+  app, components, BrowserWindow, Tray, Menu, nativeImage, shell, session, ipcMain, dialog, screen,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const PLATFORMS = require('./platforms');
@@ -19,10 +21,14 @@ const logFile = () => path.join(app.getPath('userData'), 'crash.log');
 
 let win = null;
 let current = null;           // id de la plateforme affichée, ou null = écran de choix
+let mini = null;              // fenêtre du mini-lecteur
+let miniTimer = null;
 let tray = null;
 let quitting = false;
+let startHidden = process.argv.includes('--hidden'); // lancé par Windows au démarrage
 let crashTimes = [];
 let state = { lastUrls: {} };
+let updateStatus = '';
 const configured = new Set();
 
 const byId = id => PLATFORMS.find(p => p.id === id);
@@ -42,6 +48,10 @@ function loadState() {
 function saveState() {
   if (win && !win.isDestroyed()) {
     Object.assign(state, win.getNormalBounds(), { maximized: win.isMaximized() });
+  }
+  if (mini && !mini.isDestroyed()) {
+    const [x, y] = mini.getPosition();
+    state.mini = { x, y };
   }
   try { fs.writeFileSync(stateFile(), JSON.stringify(state)); } catch {}
 }
@@ -70,6 +80,7 @@ function sessionFor(p) {
 function open(id) {
   const p = id ? byId(id) : null;
   const old = win;
+  const oldVisible = old && !old.isDestroyed() && old.isVisible();
   if (old && !old.isDestroyed()) saveState();
 
   win = new BrowserWindow({
@@ -85,14 +96,26 @@ function open(id) {
     autoHideMenuBar: true,
     show: false,
     webPreferences: p
-      ? { session: sessionFor(p), contextIsolation: true, sandbox: true, backgroundThrottling: false, plugins: true }
+      ? {
+          session: sessionFor(p),
+          preload: path.join(__dirname, 'media-preload.js'),
+          contextIsolation: true,
+          sandbox: true,
+          backgroundThrottling: false,
+          plugins: true,
+        }
       : { preload: path.join(__dirname, 'picker-preload.js'), contextIsolation: true, sandbox: true },
   });
-  if (state.maximized) win.maximize();
   current = p ? p.id : null;
 
   win.once('ready-to-show', () => {
-    win.show();
+    // Au démarrage de Windows, ou si le mini-lecteur est ouvert, la grande fenêtre reste cachée.
+    const keepHidden = (startHidden && p) || (miniOpen() && !oldVisible && p);
+    startHidden = false;
+    if (!keepHidden) {
+      if (state.maximized) win.maximize();
+      win.show();
+    }
     if (old && !old.isDestroyed()) old.destroy();
   });
 
@@ -112,12 +135,12 @@ function open(id) {
 function wireWindow(w, p) {
   const wc = w.webContents;
 
-  // Ctrl+Maj+P : revenir à l'écran de choix.
+  // Raccourcis : Ctrl+Maj+P = écran de choix, Ctrl+Maj+M = mini-lecteur.
   wc.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'p') {
-      e.preventDefault();
-      open(null);
-    }
+    if (input.type !== 'keyDown' || !input.control || !input.shift) return;
+    const k = input.key.toLowerCase();
+    if (k === 'p') { e.preventDefault(); open(null); }
+    if (k === 'm' && p) { e.preventDefault(); toggleMini(); }
   });
 
   w.on('close', e => {
@@ -176,11 +199,127 @@ function showWin() {
   win.focus();
 }
 
+// ------------------------------------------------------------------
+// Mini-lecteur : petite fenêtre toujours au premier plan.
+// Les infos viennent de la "Media Session" que chaque site remplit (titre, artiste, pochette),
+// donc ça marche sur toutes les plateformes sans code spécifique.
+// ------------------------------------------------------------------
+const miniOpen = () => !!(mini && !mini.isDestroyed());
+
+function toggleMini() {
+  if (miniOpen()) return closeMini(true);
+  if (!current) return; // rien à contrôler sur l'écran de choix
+
+  const W = 380, H = 112;
+  const area = screen.getPrimaryDisplay().workArea;
+  const pos = state.mini || { x: area.x + area.width - W - 24, y: area.y + area.height - H - 24 };
+
+  mini = new BrowserWindow({
+    width: W, height: H, x: pos.x, y: pos.y,
+    frame: false, resizable: false, maximizable: false, fullscreenable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    backgroundColor: '#111114', title: 'Platine — mini', icon: ICON,
+    webPreferences: { preload: path.join(__dirname, 'mini-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  mini.setAlwaysOnTop(true, 'floating');
+  mini.loadFile(path.join(__dirname, 'mini.html'));
+  mini.once('ready-to-show', () => mini.showInactive());
+  mini.on('moved', saveState);
+  mini.on('closed', () => { mini = null; clearInterval(miniTimer); buildTrayMenu(); });
+
+  if (win && !win.isDestroyed()) win.hide();
+  clearInterval(miniTimer);
+  miniTimer = setInterval(pushMiniState, 700);
+  pushMiniState();
+  buildTrayMenu();
+}
+
+function closeMini(showMain) {
+  if (miniOpen()) { saveState(); mini.close(); }
+  if (showMain) showWin();
+}
+
+async function pushMiniState() {
+  if (!miniOpen()) return;
+  const p = current && byId(current);
+  let s = null;
+  try {
+    if (win && !win.isDestroyed() && p) {
+      s = await win.webContents.executeJavaScript('window.__platine ? window.__platine.state() : null', true);
+    }
+  } catch {}
+  if (!miniOpen()) return;
+  mini.webContents.send('mini-state', {
+    ...(s || {}),
+    platform: p ? { name: p.name, accent: p.accent, color: p.color } : null,
+  });
+}
+
+ipcMain.on('mini-action', async (_e, action) => {
+  if (action === 'expand') return closeMini(true);
+  if (action === 'close') return closeMini(false);
+  if (!win || win.isDestroyed()) return;
+  try {
+    await win.webContents.executeJavaScript(`window.__platine && window.__platine.action(${JSON.stringify(action)})`, true);
+  } catch {}
+  setTimeout(pushMiniState, 150);
+});
+
+// ------------------------------------------------------------------
+// Démarrage avec Windows
+// ------------------------------------------------------------------
+const loginArgs = ['--hidden'];
+const startsWithWindows = () => app.getLoginItemSettings({ args: loginArgs }).openAtLogin;
+function setStartWithWindows(on) {
+  app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: loginArgs });
+  buildTrayMenu();
+}
+
+// ------------------------------------------------------------------
+// Mises à jour automatiques (depuis les Releases GitHub)
+// ------------------------------------------------------------------
+let autoUpdater = null;
+function setupUpdater() {
+  if (!app.isPackaged) return; // pas de mise à jour en mode dev (npm start)
+  try { ({ autoUpdater } = require('electron-updater')); } catch (e) { log(`Updater indisponible : ${e}`); return; }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = { info: m => log(`[maj] ${m}`), warn: m => log(`[maj] ${m}`), error: m => log(`[maj] ${m}`), debug() {} };
+
+  const setStatus = s => { updateStatus = s; buildTrayMenu(); };
+  autoUpdater.on('checking-for-update', () => setStatus('Recherche de mise à jour…'));
+  autoUpdater.on('update-not-available', () => setStatus(''));
+  autoUpdater.on('download-progress', p => setStatus(`Téléchargement de la mise à jour… ${Math.round(p.percent)} %`));
+  autoUpdater.on('error', err => { log(`[maj] erreur : ${err && err.message}`); setStatus(''); });
+  autoUpdater.on('update-downloaded', async info => {
+    setStatus(`Mise à jour ${info.version} prête`);
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Platine',
+      message: `La version ${info.version} de Platine est prête.`,
+      detail: 'Redémarrer maintenant pour l\'installer ? Sinon elle s\'installera quand tu quitteras Platine.',
+      buttons: ['Redémarrer maintenant', 'Plus tard'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) { quitting = true; autoUpdater.quitAndInstall(); }
+  });
+
+  const check = () => autoUpdater.checkForUpdates().catch(err => log(`[maj] ${err && err.message}`));
+  setTimeout(check, 10_000);               // un peu après le lancement
+  setInterval(check, 6 * 60 * 60 * 1000);  // puis toutes les 6 h
+}
+
+// ------------------------------------------------------------------
+// Icône de la zone de notif
+// ------------------------------------------------------------------
 function buildTrayMenu() {
   if (!tray) return;
   tray.setToolTip(current ? `Platine — ${byId(current).name}` : 'Platine');
-  tray.setContextMenu(Menu.buildFromTemplate([
+  const template = [
     { label: 'Afficher', click: showWin },
+    { label: 'Mini-lecteur', type: 'checkbox', checked: miniOpen(), enabled: !!current, accelerator: 'Ctrl+Shift+M', click: toggleMini },
     {
       label: 'Plateforme',
       submenu: [
@@ -200,10 +339,24 @@ function buildTrayMenu() {
         open(p.id);
       },
     },
+    { type: 'separator' },
+    {
+      label: 'Lancer au démarrage de Windows',
+      type: 'checkbox',
+      checked: app.isPackaged && startsWithWindows(),
+      enabled: app.isPackaged,
+      click: item => setStartWithWindows(item.checked),
+    },
+    {
+      label: updateStatus || `Vérifier les mises à jour (v${app.getVersion()})`,
+      enabled: app.isPackaged && !updateStatus,
+      click: () => autoUpdater && autoUpdater.checkForUpdates().catch(() => {}),
+    },
     { label: 'Ouvrir le journal des crashs', click: () => shell.openPath(logFile()) },
     { type: 'separator' },
     { label: 'Quitter', click: () => { quitting = true; app.quit(); } },
-  ]));
+  ];
+  tray.setContextMenu(Menu.buildFromTemplate(template));
 }
 
 // --- IPC de l'écran de choix ---
@@ -217,7 +370,7 @@ ipcMain.on('choose', (_e, id) => { if (byId(id)) open(id); });
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', showWin);
+  app.on('second-instance', () => { if (miniOpen()) closeMini(false); showWin(); });
 
   // Touches multimédia + contrôles Windows (SMTC) => TidalNowPlaying & co continuent de marcher.
   app.commandLine.appendSwitch('enable-features', 'HardwareMediaKeyHandling,MediaSessionService');
@@ -233,14 +386,15 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     await components.whenReady(); // module Widevine prêt
-    log(`Widevine prêt : ${JSON.stringify(components.status())}`);
+    log(`Widevine prêt : ${JSON.stringify(components.status())} — v${app.getVersion()}`);
     loadState();
 
     tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16 }));
-    tray.on('click', showWin);
+    tray.on('click', () => (miniOpen() ? closeMini(true) : showWin()));
 
     // Premier lancement => écran de choix ; ensuite on rouvre la dernière plateforme.
     open(byId(state.platform) ? state.platform : null);
+    setupUpdater();
   }).catch(err => log(`Erreur au démarrage : ${err}`));
 
   app.on('before-quit', () => { quitting = true; saveState(); });

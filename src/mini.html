@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: http: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Platine — mini</title>
+<style>
+  :root {
+    --bg: #111114;
+    --line: #26262c;
+    --text: #f2f2f4;
+    --muted: #8f8f99;
+    --accent: #33ffee;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    -webkit-app-region: drag;   /* on déplace la fenêtre en la tirant n'importe où */
+    user-select: none;
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .wrap { display: flex; align-items: center; gap: 12px; padding: 12px 12px 14px; height: 100%; }
+  .art {
+    width: 80px; height: 80px; flex: none; border-radius: 10px;
+    background: #1c1c22 center/cover no-repeat;
+    display: grid; place-items: center; color: var(--muted);
+    box-shadow: 0 4px 18px rgba(0,0,0,.45);
+  }
+  .art svg { opacity: .5; }
+  .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .artist { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .controls { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+  button {
+    all: unset;
+    -webkit-app-region: no-drag;
+    cursor: pointer; display: grid; place-items: center;
+    width: 32px; height: 32px; border-radius: 50%; color: var(--text);
+    transition: background .12s, transform .08s;
+  }
+  button:hover { background: #ffffff14; }
+  button:active { transform: scale(.92); }
+  button:disabled, button[aria-disabled="true"] { opacity: .3; cursor: default; }
+  button.play { width: 38px; height: 38px; background: var(--accent); color: #0b0b0d; }
+  button.play:hover { background: color-mix(in srgb, var(--accent) 85%, white); }
+  .top { position: absolute; top: 4px; right: 4px; display: flex; gap: 0; }
+  .top button { width: 24px; height: 24px; color: var(--muted); }
+  .top button:hover { color: var(--text); }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #ffffff10; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .7s linear; }
+  .time { font-size: 11px; color: var(--muted); margin-left: auto; padding-right: 2px; font-variant-numeric: tabular-nums; }
+  .src { font-size: 11px; color: var(--accent); opacity: .85; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="art" id="art">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
+    </div>
+    <div class="info">
+      <div class="src" id="src">Platine</div>
+      <div class="title" id="title">Rien en lecture</div>
+      <div class="artist" id="artist">Lance un morceau</div>
+      <div class="controls">
+        <button id="prev" title="Précédent">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+        </button>
+        <button id="toggle" class="play" title="Lecture / pause">
+          <svg id="ico" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button id="next" title="Suivant">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5l11 7-11 7z"/></svg>
+        </button>
+        <span class="time" id="time"></span>
+      </div>
+    </div>
+  </div>
+  <div class="top">
+    <button id="expand" title="Revenir à la grande fenêtre">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>
+    </button>
+    <button id="close" title="Fermer le mini-lecteur (la musique continue)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="bar"><i id="bar"></i></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const PLAY = '<path d="M8 5v14l11-7z"/>';
+  const PAUSE = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+  const fmt = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  let lastArt = null;
+
+  for (const id of ['prev', 'next', 'toggle', 'expand', 'close']) {
+    $(id).addEventListener('click', () => window.mini.action(id === 'prev' ? 'previoustrack' : id === 'next' ? 'nexttrack' : id));
+  }
+
+  window.mini.onState(s => {
+    if (s.platform) {
+      document.documentElement.style.setProperty('--accent', s.platform.accent);
+      $('src').textContent = s.platform.name;
+    }
+    $('title').textContent = s.title || 'Rien en lecture';
+    $('artist').textContent = s.artist || (s.title ? '' : 'Lance un morceau');
+    document.title = s.title ? `${s.title} — ${s.artist || ''}` : 'Platine — mini';
+
+    if (s.art !== lastArt) {
+      lastArt = s.art;
+      const art = $('art');
+      if (s.art) {
+        const img = new Image();
+        img.onload = () => { art.style.backgroundImage = `url("${s.art}")`; art.firstElementChild && (art.firstElementChild.style.display = 'none'); };
+        img.onerror = () => { art.style.backgroundImage = ''; art.firstElementChild && (art.firstElementChild.style.display = ''); };
+        img.src = s.art;
+      } else {
+        art.style.backgroundImage = '';
+        art.firstElementChild && (art.firstElementChild.style.display = '');
+      }
+    }
+
+    $('ico').innerHTML = s.playing ? PAUSE : PLAY;
+    $('prev').setAttribute('aria-disabled', s.can && !s.can.prev ? 'true' : 'false');
+    $('next').setAttribute('aria-disabled', s.can && !s.can.next ? 'true' : 'false');
+
+    if (s.duration) {
+      $('bar').style.width = Math.min(100, (s.position / s.duration) * 100) + '%';
+      $('time').textContent = fmt(s.position) + ' / ' + fmt(s.duration);
+    } else {
+      $('bar').style.width = '0';
+      $('time').textContent = '';
+    }
+  });
+
+  // Espace = lecture/pause, flèches = précédent/suivant, Échap = fermer.
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); window.mini.action('toggle'); }
+    if (e.key === 'ArrowLeft') window.mini.action('previoustrack');
+    if (e.key === 'ArrowRight') window.mini.action('nexttrack');
+    if (e.key === 'Escape') window.mini.action('close');
+  });
+</script>
+</body>
+</html>
