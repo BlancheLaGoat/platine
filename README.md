@@ -12,21 +12,6 @@ Tes plateformes de musique dans une vraie appli desktop, stable, en qualité max
 - Touches multimédia et contrôles Windows (donc TidalNowPlaying marche toujours)
 - « Se déconnecter de cette plateforme » et journal des crashs dans le menu de l'icône
 
-## Ajouter une plateforme
-
-Ajoute une entrée dans `src/platforms.js` : id, nom, couleurs, URL du lecteur web et domaines du site.
-
-## Lancer / construire
-
-```
-npm install
-python -m castlabs_evs.vmp sign-pkg node_modules/electron/dist
-npm start
-```
-
-Installeur : `npm run dist` (la signature Castlabs est faite automatiquement à la fin du build). Il sort dans `dist/`.
-
-Sur GitHub Actions : secrets `EVS_ACCOUNT` et `EVS_PASSWD`, puis pousse un tag `v1.0.0`.
 
 ## Connexion Google (YouTube Music)
 
