@@ -17,19 +17,35 @@
   "build": {
     "appId": "com.blanchelagoat.platine",
     "productName": "Platine",
-    "electronDist": "node_modules/electron/dist",
     "electronVersion": "44.5.1",
-    "directories": { "output": "dist" },
-    "files": ["src/**/*", "assets/**/*", "package.json"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
     "afterSign": "./scripts/evs-sign.js",
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "electronDownload": {
+      "version": "44.5.1+wvcus",
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/v"
     }
   }
 }
