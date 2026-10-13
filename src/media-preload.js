@@ -1,7 +1,74 @@
 // Injecté dans la page de chaque plateforme, AVANT ses propres scripts.
 // On garde une copie des boutons que le site déclare à Windows (play/pause/suivant/avancer…)
 // pour que Platine puisse les appuyer, et on lit titre/artiste/pochette/position.
-const { webFrame } = require('electron');
+const { webFrame, ipcRenderer } = require('electron');
+
+// ---------------- Anti-pub YouTube / YouTube Music ----------------
+// On ne bloque aucune requête (c'est ce qui cassait le lecteur) : quand une pub démarre,
+// on coupe le son, on la passe en accéléré et on clique sur « Passer » dès qu'il apparaît.
+// Les bannières et encarts pub de la page sont masqués.
+let adskip = false;
+try { adskip = /(^|\.)youtube\.com$/.test(location.hostname) && ipcRenderer.sendSync('platine:adskip'); } catch {}
+if (adskip) webFrame.executeJavaScript(`(() => {
+  if (window.__platineAdskip) return;
+  window.__platineAdskip = true;
+
+  const CSS = [
+    'ytd-ad-slot-renderer', 'ytd-in-feed-ad-layout-renderer', 'ytd-banner-promo-renderer',
+    'ytd-statement-banner-renderer', 'ytd-promoted-sparkles-web-renderer', 'ytd-display-ad-renderer',
+    'ytd-companion-slot-renderer', 'ytd-player-legacy-desktop-watch-ads-renderer', '#player-ads', '#masthead-ad',
+    'ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer)', 'ytd-search-pyv-renderer',
+    'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"]',
+    '.ytp-ad-overlay-container', '.ytp-ad-image-overlay', 'ytmusic-mealbar-promo-renderer',
+  ].join(',') + '{display:none!important}' +
+    // pendant une pub : on cache l'image de la pub (le lecteur reste noir 1 ou 2 secondes)
+    '.html5-video-player.ad-showing video{opacity:0!important}';
+
+  const addStyle = () => {
+    if (document.getElementById('platine-adskip')) return;
+    const st = document.createElement('style');
+    st.id = 'platine-adskip';
+    st.textContent = CSS;
+    (document.head || document.documentElement).appendChild(st);
+  };
+  if (document.documentElement) addStyle();
+  document.addEventListener('DOMContentLoaded', addStyle);
+
+  const SKIP = '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-slot button, .ytp-ad-skip-button-container button';
+  let inAd = false, saved = null;
+
+  setInterval(() => {
+    const player = document.querySelector('.html5-video-player.ad-showing, .html5-video-player.ad-interrupting')
+      || document.querySelector('#movie_player, .html5-video-player');
+    if (!player) return;
+    const v = player.querySelector('video');
+    const ad = player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+
+    if (ad && v) {
+      if (!inAd) { inAd = true; saved = { muted: v.muted, rate: v.playbackRate > 0 && v.playbackRate <= 2 ? v.playbackRate : 1 }; }
+      if (!v.muted) v.muted = true;
+      if (v.playbackRate !== 16) { try { v.playbackRate = 16; } catch (e) {} }
+      if (v.paused && v.readyState > 2) v.play().catch(() => {});
+      document.querySelectorAll(SKIP).forEach(b => { try { b.click(); } catch (e) {} });
+    } else if (inAd) {
+      inAd = false;
+      if (v && saved) {
+        try { v.playbackRate = saved.rate; } catch (e) {}
+        v.muted = saved.muted;
+      }
+      saved = null;
+    }
+    // fenêtre « les bloqueurs de pub ne sont pas autorisés » (au cas où)
+    const enforce = document.querySelector('ytd-enforcement-message-view-model');
+    if (enforce) {
+      const dlg = enforce.closest('tp-yt-paper-dialog');
+      const close = enforce.querySelector('#dismiss-button button, button[aria-label]');
+      if (close) close.click(); else if (dlg) dlg.remove();
+      const vv = document.querySelector('#movie_player video');
+      if (vv && vv.paused) vv.play().catch(() => {});
+    }
+  }, 250);
+})();`);
 
 webFrame.executeJavaScript(`(() => {
   if (window.__platine) return;

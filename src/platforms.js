@@ -35,7 +35,15 @@ module.exports = [
     id: 'ytmusic', name: 'YouTube Music', color: '#3a0d0d', accent: '#ff3b3b',
     url: 'https://music.youtube.com/',
     domains: ['youtube.com', 'google.com', 'gstatic.com'],
-    note: 'La connexion Google peut être refusée dans une appli',
+    adblock: true,
+    note: 'Pubs passées automatiquement · la connexion Google peut être refusée',
+  },
+  {
+    id: 'youtube', name: 'YouTube', color: '#2a0b0b', accent: '#ff4040',
+    url: 'https://www.youtube.com/',
+    domains: ['youtube.com', 'youtu.be', 'google.com', 'gstatic.com', 'ytimg.com'],
+    adblock: true,
+    note: 'Pubs passées automatiquement · la connexion Google peut être refusée',
   },
   {
     id: 'soundcloud', name: 'SoundCloud', color: '#3a1f0a', accent: '#ff7a1a',

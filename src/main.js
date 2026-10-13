@@ -85,6 +85,18 @@ function sessionFor(p) {
   return s;
 }
 
+// La page YouTube demande au démarrage si l'anti-pub est actif (voir media-preload.js).
+ipcMain.on('platine:adskip', e => { e.returnValue = state.adblock !== false; });
+
+// Active / coupe l'anti-pub sur YouTube et YouTube Music.
+async function setAdblock(on) {
+  state.adblock = on;
+  saveState();
+  const cur = current && byId(current);
+  if (cur && cur.adblock && win && !win.isDestroyed()) win.webContents.reload();
+  buildTrayMenu();
+}
+
 // Ouvre l'écran de choix (id = null) ou une plateforme, dans une nouvelle fenêtre au même endroit.
 function open(id) {
   const p = id ? byId(id) : null;
@@ -133,7 +145,8 @@ function open(id) {
   if (p) {
     state.platform = p.id;
     const last = state.lastUrls[p.id];
-    win.loadURL(last && inDomains(last, p.domains) ? last : p.url);
+    const target = last && inDomains(last, p.domains) ? last : p.url;
+    win.loadURL(target);
   } else {
     win.loadFile(path.join(__dirname, 'picker.html'));
   }
@@ -493,6 +506,13 @@ function buildTrayMenu() {
         { label: 'Copier le lien pour OBS', enabled: overlay.running(), click: () => clipboard.writeText(OVERLAY_URL) },
         { label: 'Aperçu dans le navigateur', enabled: overlay.running(), click: () => shell.openExternal(`${OVERLAY_URL}?pause=show`) },
       ],
+    },
+    { type: 'separator' },
+    {
+      label: 'Bloquer les pubs (YouTube)',
+      type: 'checkbox',
+      checked: state.adblock !== false,
+      click: item => setAdblock(item.checked),
     },
     { type: 'separator' },
     {

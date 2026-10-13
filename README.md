@@ -6,7 +6,7 @@
 
 <p align="center">
   Toutes tes plateformes de musique dans une seule appli Windows, stable et en qualité maximale.<br>
-  Tidal · Spotify · Deezer · Qobuz · Apple Music · Amazon Music · YouTube Music · SoundCloud
+  Tidal · Spotify · Deezer · Qobuz · Apple Music · Amazon Music · YouTube Music · YouTube · SoundCloud
 </p>
 
 <p align="center">
@@ -35,6 +35,7 @@ Les applis desktop officielles plantent, rament ou ne gardent pas la qualité ma
 
 - **Discord** : affiche « Écoute… » sur ton profil, avec la pochette et le temps restant, quelle que soit la plateforme.
 - **Playlists** (`Ctrl + Maj + L`) : toutes tes playlists Tidal et Spotify au même endroit, avec un bouton **Transférer vers…** (une, plusieurs ou toutes d'un coup) et une **sauvegarde** dans un fichier. Les titres sont retrouvés par leur code ISRC, puis par titre / artiste / durée ; un rapport liste ceux qui n'existent pas sur l'autre plateforme. Platine ne supprime jamais rien.
+- **YouTube et YouTube Music sans pubs** : quand une pub démarre, Platine coupe le son, la passe en accéléré et clique sur « Passer » ; les bannières et encarts pub sont masqués. Le lecteur n'est jamais modifié, donc rien ne casse. Désactivable dans le menu de l'icône.
 - **Touches multimédia** du clavier et contrôles de Windows.
 - **Mises à jour automatiques** depuis les Releases GitHub.
 - **Lancement au démarrage de Windows**, réduit dans la zone de notification.
