@@ -8,8 +8,84 @@ const { webFrame, ipcRenderer } = require('electron');
 // on coupe le son, on la passe en accéléré et on clique sur « Passer » dès qu'il apparaît.
 // Les bannières et encarts pub de la page sont masqués.
 let adskip = false;
-try { adskip = /(^|\.)youtube\.com$/.test(location.hostname) && ipcRenderer.sendSync('platine:adskip'); } catch {}
-if (adskip) webFrame.executeJavaScript(`(() => {
+let twitchMode = 'vaft';
+const isYouTube = /(^|\.)youtube\.com$/.test(location.hostname);
+const isTwitch = /(^|\.)twitch\.tv$/.test(location.hostname);
+try {
+  if (isYouTube || isTwitch) {
+    const cfg = ipcRenderer.sendSync('platine:adskip') || {};
+    adskip = !!cfg.on;
+    twitchMode = cfg.twitchMode || 'vaft';
+  }
+} catch {}
+
+// Twitch, mode « bloquer » : script TwitchAdSolutions (vaft), injecté avant les scripts de Twitch.
+// Il cherche un flux sans pub et retire les segments publicitaires du live.
+if (adskip && isTwitch && twitchMode === 'vaft') {
+  try {
+    const code = ipcRenderer.sendSync('platine:twitch-script');
+    if (code) webFrame.executeJavaScript(code);
+  } catch {}
+}
+
+// ---------------- Anti-pub Twitch ----------------
+// Encarts pub de la page : toujours masqués.
+// Mode « sourdine » : pendant une pub, on coupe le son et on cache l'image derrière un écran
+// « Pub en cours », puis on remet tout comme avant (désactivé en mode « bloquer » pour ne pas
+// couper le flux propre que trouve vaft).
+if (adskip && isTwitch) webFrame.executeJavaScript(`(() => {
+  if (window.__platineTwitchAds) return;
+  window.__platineTwitchAds = true;
+  const MUTE_DURING_ADS = ${twitchMode === 'mute'};
+
+  const CSS = [
+    '.stream-display-ad', '[data-a-target="sda-panel"]', '[data-test-selector="sad-overlay"]',
+    '[data-a-target="outstream-ax-overlay"]', '.video-ads__container', '[data-test-selector="ad-banner-default-text"]',
+    '[aria-label="Annonce"]', '[aria-label="Advertisement"]',
+  ].join(',') + '{opacity:0!important;pointer-events:none!important}' +
+    '.platine-ad-cover{position:absolute;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;' +
+    'background:#0e0e10;color:#efeff1;font:600 15px/1.4 Inter,Roobert,Segoe UI,sans-serif;text-align:center;pointer-events:none}' +
+    '.platine-ad-cover small{font-weight:400;color:#adadb8;font-size:13px}';
+  const addStyle = () => {
+    if (document.getElementById('platine-twitch-ads')) return;
+    const st = document.createElement('style');
+    st.id = 'platine-twitch-ads';
+    st.textContent = CSS;
+    (document.head || document.documentElement).appendChild(st);
+  };
+  if (document.documentElement) addStyle();
+  document.addEventListener('DOMContentLoaded', addStyle);
+
+  // repères affichés par le lecteur Twitch pendant une pub
+  const AD = '[data-a-target="video-ad-label"], [data-a-target="video-ad-countdown"], [data-test-selector="ad-banner-default-text"], .video-ads__container [data-a-target]';
+  const state = new WeakMap(); // vidéo -> { muted, cover }
+
+  if (MUTE_DURING_ADS) setInterval(() => {
+    for (const player of document.querySelectorAll('.video-player, [data-a-target="video-player"]')) {
+      const v = player.querySelector('video');
+      if (!v) continue;
+      const ad = !!player.querySelector(AD);
+      let st = state.get(v);
+      if (ad) {
+        if (!st) {
+          st = { muted: v.muted, cover: document.createElement('div') };
+          st.cover.className = 'platine-ad-cover';
+          st.cover.innerHTML = 'Pub en cours<small>Son coupé par Platine — le live reprend tout seul</small>';
+          (v.parentElement || player).appendChild(st.cover);
+          state.set(v, st);
+        }
+        if (!v.muted) v.muted = true;
+      } else if (st) {
+        v.muted = st.muted;
+        st.cover.remove();
+        state.delete(v);
+      }
+    }
+  }, 300);
+})();`);
+
+// ---------------- Anti-pub YouTube ----------------
+if (adskip && isYouTube) webFrame.executeJavaScript(`(() => {
   if (window.__platineAdskip) return;
   window.__platineAdskip = true;
 

@@ -43,11 +43,21 @@ module.exports = [
     url: 'https://www.youtube.com/',
     domains: ['youtube.com', 'youtu.be', 'google.com', 'gstatic.com', 'ytimg.com'],
     adblock: true,
+    multi: true, // plusieurs onglets possibles
     note: 'Pubs passées automatiquement · la connexion Google peut être refusée',
+  },
+  {
+    id: 'twitch', name: 'Twitch', color: '#1f1233', accent: '#a970ff',
+    url: 'https://www.twitch.tv/',
+    domains: ['twitch.tv', 'ttvnw.net', 'jtvnw.net', 'twitchcdn.net', 'twitchsvc.net'],
+    adblock: true,
+    multi: true, // plusieurs onglets possibles
+    note: 'Pubs bloquées (TwitchAdSolutions)',
   },
   {
     id: 'soundcloud', name: 'SoundCloud', color: '#3a1f0a', accent: '#ff7a1a',
     url: 'https://soundcloud.com/',
     domains: ['soundcloud.com', 'sndcdn.com'],
+    multi: true,
   },
 ];

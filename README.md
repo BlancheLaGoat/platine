@@ -6,7 +6,7 @@
 
 <p align="center">
   Toutes tes plateformes de musique dans une seule appli Windows, stable et en qualité maximale.<br>
-  Tidal · Spotify · Deezer · Qobuz · Apple Music · Amazon Music · YouTube Music · YouTube · SoundCloud
+  Tidal · Spotify · Deezer · Qobuz · Apple Music · Amazon Music · YouTube Music · YouTube · Twitch · SoundCloud
 </p>
 
 <p align="center">
@@ -24,6 +24,7 @@ Les applis desktop officielles plantent, rament ou ne gardent pas la qualité ma
 ## Fonctionnalités
 
 - **Toutes tes plateformes** : choisis-en une au premier lancement, change quand tu veux (`Ctrl + Maj + P`). Une session par plateforme, donc tu restes connecté partout.
+- **Mode onglets** (optionnel, menu de l'icône → *Mode onglets*) : plusieurs plateformes ouvertes en même temps (Tidal, Twitch, YouTube…), et **plusieurs onglets YouTube, Twitch ou SoundCloud** (chaque onglet affiche le nom de la vidéo ou de la chaîne ; un lien « ouvrir dans un nouvel onglet » crée un onglet à côté). La musique continue dans les onglets en arrière-plan. Un haut-parleur indique l'onglet qui joue (clic = couper son son). **Glisse un onglet vers le bas** (ou clic droit → *Détacher*) pour l'ouvrir dans sa propre fenêtre, sans recharger la page ; bouton *Rattacher* pour le remettre. Raccourcis : `Ctrl + T` nouvel onglet, `Ctrl + W` fermer, `Ctrl + Tab` onglet suivant, `Ctrl + 1…9`, `Ctrl + Maj + D` détacher. Sans ce mode, Platine fonctionne exactement comme avant.
 - **Ne plante plus** : si une page crashe, fige ou que la carte graphique lâche, Platine la relance tout seul, là où tu étais.
 - **Mini-lecteur** (`Ctrl + Maj + M`) : petite fenêtre toujours au premier plan, avec pochette, avance dans le morceau et volume.
 
@@ -36,6 +37,7 @@ Les applis desktop officielles plantent, rament ou ne gardent pas la qualité ma
 - **Discord** : affiche « Écoute… » sur ton profil, avec la pochette et le temps restant, quelle que soit la plateforme.
 - **Playlists** (`Ctrl + Maj + L`) : toutes tes playlists Tidal et Spotify au même endroit, avec un bouton **Transférer vers…** (une, plusieurs ou toutes d'un coup) et une **sauvegarde** dans un fichier. Les titres sont retrouvés par leur code ISRC, puis par titre / artiste / durée ; un rapport liste ceux qui n'existent pas sur l'autre plateforme. Platine ne supprime jamais rien.
 - **YouTube et YouTube Music sans pubs** : quand une pub démarre, Platine coupe le son, la passe en accéléré et clique sur « Passer » ; les bannières et encarts pub sont masqués. Le lecteur n'est jamais modifié, donc rien ne casse. Désactivable dans le menu de l'icône.
+- **Twitch sans pubs** : par défaut, Platine utilise le script *vaft* de [TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions) (licence MIT), qui cherche un flux sans pub et retire les segments publicitaires du live. Le projet a été archivé par son auteur en mars 2026 : s'il ne suffit plus, menu de l'icône → *Pubs Twitch* → *Couper le son et masquer* (le son est coupé et l'image cachée pendant la pub). Les encarts pub de la page sont toujours masqués.
 - **Touches multimédia** du clavier et contrôles de Windows.
 - **Mises à jour automatiques** depuis les Releases GitHub.
 - **Lancement au démarrage de Windows**, réduit dans la zone de notification.
@@ -100,5 +102,7 @@ npm start
 - **Playlists** : les connecteurs sont dans `src/connectors/` (un fichier par plateforme + `match.js` pour la correspondance des titres). Les jetons sont chiffrés par Windows (`safeStorage`) dans le dossier de données de Platine.
 - **Publier une version** : change `"version"` dans `package.json`, commit, push, puis tag `vX.Y.Z`. Le workflow GitHub Actions (secrets `EVS_ACCOUNT` / `EVS_PASSWD`) construit, signe et publie la Release ; les Platine installés se mettent à jour tout seuls.
 - **Mettre à jour Chrome** : change la version Castlabs aux deux endroits de `package.json` (`devDependencies.electron` et `build.electronDownload.version`).
+
+Le blocage des pubs Twitch reprend le script *vaft* de [TwitchAdSolutions](https://github.com/pixeltris/TwitchAdSolutions) (MIT, © TwitchAdSolutions Contributors), copié tel quel dans `src/vendor/`.
 
 Construit avec [Electron for Content Security (Castlabs)](https://github.com/castlabs/electron-releases), [electron-builder](https://www.electron.build/) et [@xhayper/discord-rpc](https://github.com/xhayper/discord-rpc). Platine n'est affilié à aucune des plateformes citées.

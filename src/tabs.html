@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Onglets</title>
+<style>
+  :root { --bg: #0b0b0d; --tab: #16161a; --tab-hover: #1d1d22; --line: #232329; --text: #f2f2f4; --muted: #8d8d97; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg); color: var(--text); user-select: none;
+    font: 13px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    display: flex; align-items: stretch; border-bottom: 1px solid var(--line);
+  }
+  #tabs { display: flex; align-items: flex-end; gap: 4px; padding: 6px 6px 0; min-width: 0; flex: 1; overflow: hidden; }
+  .tab {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    height: 33px; min-width: 64px; max-width: 210px; flex: 0 1 210px; padding: 0 8px 0 12px;
+    border-radius: 9px 9px 0 0; background: transparent; color: var(--muted); cursor: default;
+    transition: background .12s, color .12s;
+  }
+  .tab:hover { background: var(--tab-hover); color: var(--text); }
+  .tab.active { background: var(--tab); color: var(--text); }
+  .tab.active::after {
+    content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent);
+  }
+  .tab.dragging { opacity: .55; }
+  .tab.detach { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--accent); }
+  .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .icon {
+    flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+    color: var(--muted); background: none; border: 0; cursor: pointer;
+  }
+  .icon:hover { background: #ffffff14; color: var(--text); }
+  .close { opacity: 0; }
+  .tab:hover .close, .tab.active .close { opacity: 1; }
+  .sound { color: var(--accent); }
+  .sound.muted { color: var(--muted); }
+  #plus { align-self: center; width: 30px; height: 30px; margin-left: 2px; border-radius: 8px; }
+  #right { display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+  #attachAll {
+    display: none; height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: #ffffff0a; color: var(--text); font: inherit; font-weight: 600; cursor: pointer;
+  }
+  #attachAll:hover { background: #ffffff16; }
+  body.detached #attachAll { display: inline-flex; align-items: center; gap: 6px; }
+  .hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div id="tabs"></div>
+  <div id="right">
+    <span class="hint" id="hint"></span>
+    <button id="attachAll" title="Remettre cet onglet dans la fenêtre principale">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14l-5-5 5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+      Rattacher
+    </button>
+  </div>
+<script>
+  const $ = id => document.getElementById(id);
+  const ICON_X = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const ICON_SOUND = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  const ICON_MUTED = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>';
+  let st = { tabs: [], active: null, main: true };
+
+  function render() {
+    document.body.classList.toggle('detached', !st.main);
+    const box = $('tabs');
+    box.replaceChildren();
+    st.tabs.forEach((t, i) => {
+      const el = document.createElement('div');
+      el.className = 'tab' + (t.key === st.active ? ' active' : '');
+      el.style.setProperty('--accent', t.accent);
+      el.dataset.key = t.key;
+      el.title = (t.platform && t.platform !== t.name ? t.platform + ' — ' : '') + t.name
+        + (st.main && !t.picker ? '\n(glisse vers le bas pour le détacher)' : '');
+
+      const dot = document.createElement('span'); dot.className = 'dot';
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = t.name;
+      el.append(dot, name);
+
+      if (t.audible || t.muted) {
+        const s = document.createElement('button');
+        s.className = 'icon sound' + (t.muted ? ' muted' : '');
+        s.innerHTML = t.muted ? ICON_MUTED : ICON_SOUND;
+        s.title = t.muted ? 'Remettre le son' : 'Couper le son de cet onglet';
+        s.onpointerdown = e => e.stopPropagation();
+        s.onclick = e => { e.stopPropagation(); window.tabs.mute(t.key); };
+        el.append(s);
+      }
+      const x = document.createElement('button');
+      x.className = 'icon close'; x.innerHTML = ICON_X; x.title = 'Fermer (Ctrl+W)';
+      x.onpointerdown = e => e.stopPropagation();
+      x.onclick = e => { e.stopPropagation(); window.tabs.close(t.key); };
+      el.append(x);
+
+      el.onauxclick = e => { if (e.button === 1) window.tabs.close(t.key); };
+      el.oncontextmenu = e => { e.preventDefault(); window.tabs.menu(t.key); };
+      dragify(el, t, i);
+      box.append(el);
+    });
+    if (st.main || st.tabs.length) {
+      const plus = document.createElement('button');
+      plus.id = 'plus'; plus.className = 'icon'; plus.innerHTML = ICON_PLUS; plus.title = 'Nouvel onglet (Ctrl+T)';
+      plus.onclick = () => window.tabs.newTab();
+      box.append(plus);
+    }
+    $('hint').textContent = '';
+  }
+
+  // Clic = activer ; glisser à gauche/droite = réordonner ; glisser vers le bas = détacher dans une fenêtre.
+  function dragify(el, t, index) {
+    el.onpointerdown = e => {
+      if (e.button !== 0) return;
+      const startX = e.clientX, startY = e.clientY;
+      let moved = false, detachIntent = false;
+      el.setPointerCapture(e.pointerId);
+      window.tabs.activate(t.key);
+
+      el.onpointermove = ev => {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        if (!moved && Math.hypot(dx, dy) < 6) return;
+        moved = true;
+        el.classList.add('dragging');
+        const canDetach = !t.picker && (st.main || st.tabs.length > 1);
+        detachIntent = canDetach && dy > 28;
+        el.classList.toggle('detach', detachIntent);
+        $('hint').textContent = detachIntent ? 'Relâche pour ouvrir dans une nouvelle fenêtre' : '';
+        el.style.transform = detachIntent ? 'none' : `translateX(${dx}px)`;
+      };
+      let last = e, done = false;
+      const finish = ev => {
+        if (done) return;
+        done = true;
+        el.onpointermove = el.onpointerup = el.onlostpointercapture = null;
+        el.classList.remove('dragging', 'detach');
+        el.style.transform = '';
+        $('hint').textContent = '';
+        if (!moved) return;
+        if (detachIntent) { window.tabs.detach(t.key, ev.screenX, ev.screenY); return; }
+        // réordonner : nouvel emplacement selon la position du curseur
+        const others = [...document.querySelectorAll('.tab')].filter(x => x !== el);
+        let to = others.findIndex(o => { const r = o.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
+        if (to < 0) to = others.length;
+        if (to !== index) window.tabs.move(t.key, to);
+      };
+      const move = el.onpointermove;
+      el.onpointermove = ev => { last = ev; move(ev); };
+      el.onpointerup = ev => finish(ev);
+      // si on relâche hors de la barre, on reçoit seulement la perte de capture
+      el.onlostpointercapture = () => finish(last);
+    };
+  }
+
+  $('attachAll').onclick = () => { const a = st.tabs.find(t => t.key === st.active) || st.tabs[0]; if (a) window.tabs.attach(a.key); };
+  window.tabs.onState(s => { st = s; render(); });
+</script>
+</body>
+</html>
