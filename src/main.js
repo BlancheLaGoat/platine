@@ -160,6 +160,10 @@ class Host {
     this.win.on('resize', () => { this.layout(); if (this.main) saveState(); });
     this.win.on('move', () => { if (this.main) saveState(); });
     this.win.on('focus', () => { if (this.active && alive(this.active)) this.active.view.webContents.focus(); });
+    this.win.on('app-command', (_e, cmd) => {   // boutons latéraux de la souris
+      if (cmd === 'browser-backward') goBack(this);
+      if (cmd === 'browser-forward') goForward(this);
+    });
     this.win.on('close', e => {
       if (this.main) {
         saveState();
@@ -178,7 +182,7 @@ class Host {
     this.layout();
   }
 
-  barVisible() { return (tabsMode() || !this.main) && !this.fullscreenTab; }
+  barVisible() { return !this.fullscreenTab; } // la barre porte le bouton Accueil, même en mode classique
 
   layout() {
     if (this.win.isDestroyed()) return;
@@ -217,6 +221,7 @@ class Host {
 
   activate(tab) {
     if (!tab || this.tabs.indexOf(tab) < 0) return;
+    if (this.active && this.active !== tab) this.previous = this.active;
     this.active = tab;
     for (const t of this.tabs) t.view.setVisible(t === tab);
     if (!this.win.isDestroyed()) {
@@ -246,6 +251,7 @@ class Host {
       main: this.main,
       tabsMode: tabsMode(),
       active: this.active ? this.active.key : null,
+      nav: navState(this),
       tabs: this.tabs.map(t => ({
         key: t.key,
         name: t.p ? tabName(t) : 'Nouvel onglet',
@@ -321,6 +327,9 @@ function wireTab(tab) {
   const p = tab.p;
   wc.on('before-input-event', (e, input) => shortcut(e, input, tab.host));
   wc.on('audio-state-changed', () => tab.host && tab.host.updateBar());
+  for (const ev of ['did-navigate', 'did-navigate-in-page', 'did-finish-load']) {
+    wc.on(ev, () => { if (tab.host && tab.host.active === tab) tab.host.updateBar(); });
+  }
   wc.on('enter-html-full-screen', () => tab.host && tab.host.enterFullscreen(tab));
   wc.on('leave-html-full-screen', () => tab.host && tab.host.exitFullscreen());
   wc.on('page-title-updated', (_e, title) => { tab.title = title; if (tab.host) tab.host.updateBar(); });
@@ -468,6 +477,33 @@ function setTabsMode(on) {
   buildTrayMenu();
 }
 
+// Accueil : affiche l'écran de choix SANS fermer la plateforme en cours (la musique continue).
+// Choisir la même plateforme y revient ; en choisir une autre la remplace (mode classique).
+function goHome(inHost) {
+  if (!mainHost) createMainHost();
+  let host = inHost && !inHost.win.isDestroyed() ? inHost : mainHost;
+  if (!tabsMode()) host = mainHost;
+  const picker = host.tabs.find(t => !t.p);
+  if (picker) { host.activate(picker); showHost(host); return picker; }
+  const tab = createTab(null);
+  host.add(tab);
+  showHost(host);
+  return tab;
+}
+
+// « Retour » depuis l'accueil : revient à la page d'avant et ferme l'écran de choix.
+function leaveHome(pickerTab) {
+  const host = pickerTab && pickerTab.host;
+  if (!host) return;
+  const back = host.previous && host.previous !== pickerTab && host.tabs.includes(host.previous) && host.previous.p
+    ? host.previous
+    : [...host.tabs].reverse().find(t => t.p);
+  if (!back) return; // rien vers quoi revenir
+  host.activate(back);
+  destroyTab(pickerTab);
+  saveState();
+}
+
 function closeTab(tab) {
   const host = tab.host;
   if (!host) return;
@@ -483,12 +519,48 @@ function closeTab(tab) {
 }
 
 // Raccourcis clavier, valables dans toutes les pages.
+// ------------------------------------------------------------------
+// Retour / Suivant (historique de la page affichée)
+// Sur l'écran d'accueil, « Retour » ramène à la plateforme d'où on vient.
+// ------------------------------------------------------------------
+const navOf = t => (alive(t) ? t.view.webContents.navigationHistory : null);
+
+function navState(host) {
+  const t = host.active;
+  if (!t) return { back: false, forward: false };
+  if (!t.p) {
+    const prev = host.previous && host.previous !== t && host.tabs.includes(host.previous) && host.previous.p;
+    return { back: !!(prev || host.tabs.some(x => x.p)), forward: false };
+  }
+  const h = navOf(t);
+  return { back: !!(h && h.canGoBack()), forward: !!(h && h.canGoForward()) };
+}
+
+function goBack(host = mainHost) {
+  const t = host && host.active;
+  if (!t) return;
+  if (!t.p) return leaveHome(t);
+  const h = navOf(t);
+  if (h && h.canGoBack()) h.goBack();
+}
+
+function goForward(host = mainHost) {
+  const t = host && host.active;
+  const h = t && t.p && navOf(t);
+  if (h && h.canGoForward()) h.goForward();
+}
+
 function shortcut(e, input, host) {
+  // Alt + ← / → : retour / suivant (comme dans un navigateur)
+  if (input.type === 'keyDown' && input.alt && !input.control && (input.key === 'ArrowLeft' || input.key === 'ArrowRight')) {
+    e.preventDefault();
+    return input.key === 'ArrowLeft' ? goBack(host || mainHost) : goForward(host || mainHost);
+  }
   if (input.type !== 'keyDown' || !input.control) return;
   const k = input.key.toLowerCase();
   const h = host || mainHost;
   if (input.shift) {
-    if (k === 'p') { e.preventDefault(); open(null, { inHost: h }); }
+    if (k === 'p') { e.preventDefault(); goHome(h); }
     if (k === 'm') { e.preventDefault(); toggleMini(); }
     if (k === 'l') { e.preventDefault(); openPlaylists(); }
     if (k === 'd' && tabsMode() && h && h.active) { e.preventDefault(); detach(h.active); }
@@ -517,6 +589,10 @@ function showWin() {
 const tabByKey = key => findTab(t => t.key === key);
 ipcMain.on('tabs:activate', (_e, key) => { const t = tabByKey(key); if (t) t.host.activate(t); });
 ipcMain.on('tabs:close', (_e, key) => { const t = tabByKey(key); if (t) closeTab(t); });
+const hostOfBar = sender => [...hosts].find(x => x.bar.webContents === sender) || mainHost;
+ipcMain.on('tabs:back', e => goBack(hostOfBar(e.sender)));
+ipcMain.on('tabs:forward', e => goForward(hostOfBar(e.sender)));
+ipcMain.on('tabs:home', e => { const h = [...hosts].find(x => x.bar.webContents === e.sender); goHome(h || mainHost); });
 ipcMain.on('tabs:new', e => { const h = [...hosts].find(x => x.bar.webContents === e.sender); open(null, { inHost: h || mainHost }); });
 ipcMain.on('tabs:detach', (_e, key, x, y) => { const t = tabByKey(key); if (t) detach(t, x != null ? { x, y } : null); });
 ipcMain.on('tabs:attach', (_e, key) => { const t = tabByKey(key); if (t) attach(t); });
@@ -812,6 +888,7 @@ function buildTrayMenu() {
   const openIds = new Set(allTabs().filter(t => t.p).map(t => t.p.id));
   const template = [
     { label: 'Afficher', click: showWin },
+    { label: 'Accueil', click: () => goHome() },
     { label: 'Playlists…', accelerator: 'Ctrl+Shift+L', click: openPlaylists },
     { label: 'Mini-lecteur', type: 'checkbox', checked: miniOpen(), enabled: openIds.size > 0, accelerator: 'Ctrl+Shift+M', click: toggleMini },
     {
@@ -823,7 +900,7 @@ function buildTrayMenu() {
             : { label: p.name, type: 'checkbox', checked: openIds.has(p.id), click: () => open(p.id) })
           : { label: p.name, type: 'radio', checked: !!act && act.p.id === p.id, click: () => open(p.id) }),
         { type: 'separator' },
-        { label: tabsMode() ? 'Nouvel onglet' : 'Écran de choix', click: () => open(null) },
+        { label: 'Accueil', click: () => goHome() },
       ],
     },
     {
@@ -895,10 +972,22 @@ function buildTrayMenu() {
 }
 
 // --- IPC de l'écran de choix ---
-ipcMain.handle('platforms', () => ({
-  list: PLATFORMS.map(({ id, name, color, accent, note }) => ({ id, name, color, accent, note })),
-  last: state.platform || null,
-}));
+ipcMain.handle('platforms', e => {
+  const pickerTab = findTab(t => !t.p && alive(t) && t.view.webContents === e.sender);
+  const host = pickerTab && pickerTab.host;
+  const back = host && (host.previous && host.previous.p && host.tabs.includes(host.previous)
+    ? host.previous : [...host.tabs].reverse().find(t => t.p));
+  return {
+    list: PLATFORMS.map(({ id, name, color, accent, note }) => ({ id, name, color, accent, note })),
+    last: state.platform || null,
+    open: [...new Set(allTabs().filter(t => t.p).map(t => t.p.id))],
+    back: back ? { id: back.p.id, name: tabName(back) } : null,
+  };
+});
+ipcMain.on('picker:back', e => {
+  const pickerTab = findTab(t => !t.p && alive(t) && t.view.webContents === e.sender);
+  if (pickerTab) leaveHome(pickerTab);
+});
 ipcMain.on('choose', (e, id) => {
   if (!byId(id)) return;
   const pickerTab = findTab(t => !t.p && alive(t) && t.view.webContents === e.sender);
@@ -967,7 +1056,7 @@ process.on('uncaughtException', err => log(`Exception non gérée : ${err.stack 
 // Accès interne pour les tests automatiques uniquement.
 if (process.env.PLATINE_TEST) {
   global.__platineTest = {
-    open, detach, attach, closeTab, setTabsMode, poll,
+    open, detach, attach, closeTab, setTabsMode, poll, goHome, leaveHome, goBack, goForward,
     hosts: () => [...hosts], main: () => mainHost, tabs: allTabs, nowTab: () => nowTab, state: () => state,
   };
 }

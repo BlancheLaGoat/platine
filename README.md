@@ -23,7 +23,9 @@ Les applis desktop officielles plantent, rament ou ne gardent pas la qualité ma
 
 ## Fonctionnalités
 
-- **Toutes tes plateformes** : choisis-en une au premier lancement, change quand tu veux (`Ctrl + Maj + P`). Une session par plateforme, donc tu restes connecté partout.
+- **Toutes tes plateformes** : choisis-en une au premier lancement, change quand tu veux. Une session par plateforme, donc tu restes connecté partout.
+- **Bouton Accueil** en haut à gauche : revient à l'écran de choix **sans couper la musique** (la plateforme en cours reste ouverte derrière). Choisis-en une autre pour changer, ou « Revenir à … » / `Échap` pour retourner où tu étais. Aussi : `Ctrl + Maj + P`, ou clic droit sur l'icône → Accueil.
+- **Retour / Suivant** à côté d'Accueil, pour naviguer dans la page affichée comme dans un navigateur (aussi `Alt + ←` / `Alt + →` et les boutons latéraux de la souris). Sur l'écran d'accueil, Retour ramène à la plateforme d'où tu viens.
 - **Mode onglets** (optionnel, menu de l'icône → *Mode onglets*) : plusieurs plateformes ouvertes en même temps (Tidal, Twitch, YouTube…), et **plusieurs onglets YouTube, Twitch ou SoundCloud** (chaque onglet affiche le nom de la vidéo ou de la chaîne ; un lien « ouvrir dans un nouvel onglet » crée un onglet à côté). La musique continue dans les onglets en arrière-plan. Un haut-parleur indique l'onglet qui joue (clic = couper son son). **Glisse un onglet vers le bas** (ou clic droit → *Détacher*) pour l'ouvrir dans sa propre fenêtre, sans recharger la page ; bouton *Rattacher* pour le remettre. Raccourcis : `Ctrl + T` nouvel onglet, `Ctrl + W` fermer, `Ctrl + Tab` onglet suivant, `Ctrl + 1…9`, `Ctrl + Maj + D` détacher. Sans ce mode, Platine fonctionne exactement comme avant.
 - **Ne plante plus** : si une page crashe, fige ou que la carte graphique lâche, Platine la relance tout seul, là où tu étais.
 - **Mini-lecteur** (`Ctrl + Maj + M`) : petite fenêtre toujours au premier plan, avec pochette, avance dans le morceau et volume.

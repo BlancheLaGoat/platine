@@ -23,7 +23,16 @@
     user-select: none;
   }
   main { width: min(920px, 100% - 48px); padding: 48px 0; }
-  header { margin-bottom: 32px; }
+  header { margin-bottom: 32px; display: flex; align-items: flex-end; gap: 16px; }
+  header .titles { flex: 1; min-width: 0; }
+  .back {
+    all: unset; cursor: pointer; display: none; align-items: center; gap: 8px; white-space: nowrap;
+    height: 36px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 600;
+    background: #ffffff10; border: 1px solid var(--line); color: var(--text);
+  }
+  .back:hover, .back:focus-visible { background: #ffffff1a; }
+  .back.show { display: inline-flex; }
+  .badge.open { color: #3ddc84; border-color: #3ddc8466; }
   h1 { font-size: 34px; font-weight: 650; letter-spacing: -0.02em; }
   header p { color: var(--muted); margin-top: 6px; font-size: 15px; }
   .grid {
@@ -77,16 +86,29 @@
 <body>
 <main>
   <header>
-    <h1>Choisis ta plateforme</h1>
-    <p>Connecte-toi une fois, Platine garde ta session. Tu peux en changer quand tu veux.</p>
+    <div class="titles">
+      <h1>Choisis ta plateforme</h1>
+      <p>Connecte-toi une fois, Platine garde ta session. Tu peux en changer quand tu veux.</p>
+    </div>
+    <button class="back" id="back" title="Échap">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg>
+      <span id="backText">Revenir</span>
+    </button>
   </header>
   <div class="grid" id="grid"></div>
   <footer>
-    <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>P</kbd> pour revenir ici, ou clic droit sur l'icône Platine près de l'horloge.
+Le bouton <b>Accueil</b> en haut à gauche ramène ici à tout moment (ou <kbd>Ctrl</kbd> + <kbd>Maj</kbd> + <kbd>P</kbd>).
   </footer>
 </main>
 <script>
-  window.platine.platforms().then(({ list, last }) => {
+  window.platine.platforms().then(({ list, last, open = [], back }) => {
+    if (back) {
+      const b = document.getElementById('back');
+      document.getElementById('backText').textContent = `Revenir à ${back.name}`;
+      b.classList.add('show');
+      b.onclick = () => window.platine.back();
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') window.platine.back(); });
+    }
     const grid = document.getElementById('grid');
     for (const p of list) {
       const b = document.createElement('button');
@@ -97,7 +119,8 @@
         <span class="tile"></span>
         <span class="name"></span>
         ${p.note ? '<span class="note"></span>' : ''}
-        ${p.id === last ? '<span class="badge">Dernière utilisée</span>' : ''}`;
+        ${open.includes(p.id) ? '<span class="badge open">Ouvert</span>'
+          : p.id === last ? '<span class="badge">Dernière utilisée</span>' : ''}`;
       b.querySelector('.tile').textContent = p.name[0];
       b.querySelector('.name').textContent = p.name;
       if (p.note) b.querySelector('.note').textContent = p.note;

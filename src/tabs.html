@@ -38,6 +38,22 @@
   .tab:hover .close, .tab.active .close { opacity: 1; }
   .sound { color: var(--accent); }
   .sound.muted { color: var(--muted); }
+  .nav {
+    align-self: center; flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+  }
+  .nav:first-child { margin-left: 2px; }
+  .nav:hover:not(:disabled) { background: #ffffff14; color: var(--text); }
+  .nav:disabled { opacity: .3; cursor: default; }
+  #home {
+    align-self: center; flex: none; display: flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 10px; margin: 0 4px 0 2px; border-radius: 8px;
+    color: var(--muted); background: none; border: 0; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  #home:hover { background: #ffffff14; color: var(--text); }
+  #home.on { background: #ffffff12; color: var(--text); }
+  #home .lbl { font-size: 12.5px; }
+  body.classic .tab { flex: 0 1 240px; }
   #plus { align-self: center; width: 30px; height: 30px; margin-left: 2px; border-radius: 8px; }
   #right { display: flex; align-items: center; gap: 6px; padding: 0 8px; }
   #attachAll {
@@ -64,13 +80,43 @@
   const ICON_SOUND = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const ICON_MUTED = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>';
-  let st = { tabs: [], active: null, main: true };
+  const ICON_BACK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>';
+  const ICON_FWD = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+  const ICON_HOME = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>';
+  let st = { tabs: [], active: null, main: true, tabsMode: false };
 
   function render() {
+    const classic = st.main && !st.tabsMode;
     document.body.classList.toggle('detached', !st.main);
+    document.body.classList.toggle('classic', classic);
     const box = $('tabs');
     box.replaceChildren();
-    st.tabs.forEach((t, i) => {
+
+    // Retour / Suivant sur la page affichée
+    const nav = st.nav || {};
+    const back = document.createElement('button');
+    back.className = 'nav'; back.innerHTML = ICON_BACK; back.disabled = !nav.back;
+    back.title = 'Retour (Alt+←)';
+    back.onclick = () => window.tabs.back();
+    const fwd = document.createElement('button');
+    fwd.className = 'nav'; fwd.innerHTML = ICON_FWD; fwd.disabled = !nav.forward;
+    fwd.title = 'Suivant (Alt+→)';
+    fwd.onclick = () => window.tabs.forward();
+    box.append(back, fwd);
+
+    // bouton Accueil : écran de choix, sans fermer ce qui joue
+    const activeTab = st.tabs.find(t => t.key === st.active);
+    const home = document.createElement('button');
+    home.id = 'home';
+    home.className = activeTab && activeTab.picker ? 'on' : '';
+    home.title = 'Accueil — choisir une plateforme (Ctrl+Maj+P)\nLa musique en cours continue.';
+    home.innerHTML = ICON_HOME + '<span class="lbl">Accueil</span>';
+    home.onclick = () => window.tabs.home();
+    box.append(home);
+
+    // en mode classique : seulement la plateforme ouverte (clic = y revenir), pas d'onglet « accueil »
+    const shown = classic ? st.tabs.filter(t => !t.picker) : st.tabs;
+    shown.forEach((t, i) => {
       const el = document.createElement('div');
       el.className = 'tab' + (t.key === st.active ? ' active' : '');
       el.style.setProperty('--accent', t.accent);
@@ -91,6 +137,12 @@
         s.onclick = e => { e.stopPropagation(); window.tabs.mute(t.key); };
         el.append(s);
       }
+      if (classic) {
+        el.title = t.name;
+        el.onclick = () => window.tabs.activate(t.key);
+        box.append(el);
+        return;
+      }
       const x = document.createElement('button');
       x.className = 'icon close'; x.innerHTML = ICON_X; x.title = 'Fermer (Ctrl+W)';
       x.onpointerdown = e => e.stopPropagation();
@@ -99,10 +151,10 @@
 
       el.onauxclick = e => { if (e.button === 1) window.tabs.close(t.key); };
       el.oncontextmenu = e => { e.preventDefault(); window.tabs.menu(t.key); };
-      dragify(el, t, i);
+      dragify(el, t, st.tabs.indexOf(t));
       box.append(el);
     });
-    if (st.main || st.tabs.length) {
+    if (!classic && (st.main || st.tabs.length)) {
       const plus = document.createElement('button');
       plus.id = 'plus'; plus.className = 'icon'; plus.innerHTML = ICON_PLUS; plus.title = 'Nouvel onglet (Ctrl+T)';
       plus.onclick = () => window.tabs.newTab();

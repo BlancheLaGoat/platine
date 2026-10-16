@@ -1,7 +1,7 @@
 {
   "name": "platine",
   "productName": "Platine",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Toutes tes plateformes de musique (Tidal, Spotify, Deezer…) dans une appli desktop stable, qualité max (Widevine).",
   "main": "src/main.js",
   "author": "BlancheLaGoat",
