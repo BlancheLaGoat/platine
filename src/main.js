@@ -108,6 +108,24 @@ function sessionFor(p) {
 
 // La page YouTube/Twitch demande au démarrage si l'anti-pub est actif (voir media-preload.js).
 ipcMain.on('platine:adskip', e => { e.returnValue = { on: state.adblock !== false, twitchMode: state.twitchAds || 'vaft' }; });
+// YouTube : vrai clic de souris sur le bouton « Passer » (coordonnées envoyées par la page).
+const lastSkipClick = new WeakMap();
+ipcMain.on('platine:yt-skip', (e, pt) => {
+  const wc = e.sender;
+  const tab = findTab(t => alive(t) && t.view.webContents === wc);
+  if (!tab || !tab.p || !tab.p.adblock || state.adblock === false) return;
+  if (!/(^|\.)youtube\.com$/.test(hostOf(wc.getURL()))) return;
+  const x = Math.round(Number(pt && pt.x)), y = Math.round(Number(pt && pt.y));
+  const [w, h] = (() => { const b = tab.view.getBounds(); return [b.width, b.height]; })();
+  if (!(x >= 0 && y >= 0 && x <= w && y <= h)) return;
+  const now = Date.now();
+  if (now - (lastSkipClick.get(wc) || 0) < 600) return;
+  lastSkipClick.set(wc, now);
+  wc.sendInputEvent({ type: 'mouseMove', x, y });
+  wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+  wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+});
+
 // Script TwitchAdSolutions (vaft), lu une fois puis gardé en mémoire.
 let vaftCode = null;
 ipcMain.on('platine:twitch-script', e => {
@@ -180,6 +198,7 @@ class Host {
     });
     hosts.add(this);
     this.layout();
+    setImmediate(() => updateThumbar(true));
   }
 
   barVisible() { return !this.fullscreenTab; } // la barre porte le bouton Accueil, même en mode classique
@@ -252,6 +271,7 @@ class Host {
       tabsMode: tabsMode(),
       active: this.active ? this.active.key : null,
       nav: navState(this),
+      np: npForBar(),
       tabs: this.tabs.map(t => ({
         key: t.key,
         name: t.p ? tabName(t) : 'Nouvel onglet',
@@ -556,6 +576,10 @@ function shortcut(e, input, host) {
     e.preventDefault();
     return input.key === 'ArrowLeft' ? goBack(host || mainHost) : goForward(host || mainHost);
   }
+  if (input.type === 'keyDown' && (input.key === 'F5' || (input.control && !input.shift && input.key.toLowerCase() === 'r'))) {
+    e.preventDefault();
+    return reloadActive(host || mainHost, input.control && input.key === 'F5');
+  }
   if (input.type !== 'keyDown' || !input.control) return;
   const k = input.key.toLowerCase();
   const h = host || mainHost;
@@ -591,6 +615,9 @@ ipcMain.on('tabs:activate', (_e, key) => { const t = tabByKey(key); if (t) t.hos
 ipcMain.on('tabs:close', (_e, key) => { const t = tabByKey(key); if (t) closeTab(t); });
 const hostOfBar = sender => [...hosts].find(x => x.bar.webContents === sender) || mainHost;
 ipcMain.on('tabs:back', e => goBack(hostOfBar(e.sender)));
+ipcMain.on('tabs:reload', e => reloadActive(hostOfBar(e.sender)));
+ipcMain.on('tabs:media', (_e, action) => { if (['previoustrack', 'toggle', 'nexttrack'].includes(action)) mediaAction(action); });
+ipcMain.on('tabs:show-playing', () => { if (nowTab && nowTab.host) { nowTab.host.activate(nowTab); nowTab.host.show(); } });
 ipcMain.on('tabs:forward', e => goForward(hostOfBar(e.sender)));
 ipcMain.on('tabs:home', e => { const h = [...hosts].find(x => x.bar.webContents === e.sender); goHome(h || mainHost); });
 ipcMain.on('tabs:new', e => { const h = [...hosts].find(x => x.bar.webContents === e.sender); open(null, { inHost: h || mainHost }); });
@@ -668,6 +695,7 @@ function closeMini(showMain) {
 // Suivi de la lecture : une lecture par seconde, partagée entre le mini-lecteur, Discord et l'overlay OBS.
 // Avec plusieurs onglets, on suit celui qui joue (en priorité celui qu'on suivait déjà).
 // ------------------------------------------------------------------
+let lastBarNp = null;
 async function poll() {
   const tabs = allTabs().filter(t => t.p && alive(t));
   const states = await Promise.all(tabs.map(async t => {
@@ -694,6 +722,9 @@ async function poll() {
     platform: p ? { id: p.id, name: p.name, accent: p.accent, color: p.color } : null,
   };
   sendToMini(nowPlaying);
+  const barKey = JSON.stringify(npForBar());
+  if (barKey !== lastBarNp) { lastBarNp = barKey; for (const h of hosts) h.updateBar(); }
+  updateThumbar();
   discord.update(nowPlaying);
   overlay.update(nowPlaying);
 }
@@ -708,15 +739,57 @@ function startPolling() {
   poll();
 }
 
-ipcMain.on('mini-action', async (_e, action) => {
-  if (action === 'expand') return closeMini(true);
-  if (action === 'close') return closeMini(false);
+// Commande de lecture (précédent / lecture-pause / suivant) sur l'onglet qui joue.
+async function mediaAction(action) {
   if (!alive(nowTab)) return;
   try {
     await nowTab.view.webContents.executeJavaScript(`window.__platine && window.__platine.action(${JSON.stringify(action)})`, true);
   } catch {}
   setTimeout(poll, 150);
+}
+
+ipcMain.on('mini-action', (_e, action) => {
+  if (action === 'expand') return closeMini(true);
+  if (action === 'close') return closeMini(false);
+  mediaAction(action);
 });
+
+// Ce que la barre affiche du morceau en cours (uniquement s'il y a un titre).
+function npForBar() {
+  const np = nowPlaying;
+  if (!np || !np.title || !np.platform) return null;
+  return {
+    title: np.title, artist: np.artist || '', playing: !!np.playing,
+    platform: np.platform.name, accent: np.platform.accent,
+    prev: !(np.can && np.can.prev === false), next: !(np.can && np.can.next === false),
+  };
+}
+
+// Actualiser la page affichée (Ctrl+F5 = sans le cache).
+function reloadActive(host = mainHost, hard = false) {
+  const t = host && host.active;
+  if (!alive(t)) return;
+  hard ? t.view.webContents.reloadIgnoringCache() : t.view.webContents.reload();
+}
+
+// Boutons ⏮ ⏯ ⏭ dans l'aperçu de la barre des tâches Windows (comme Spotify/Tidal).
+const thumbIcon = n => nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'thumbar', `${n}.png`));
+let thumbKey = null;
+function updateThumbar(force = false) {
+  const np = npForBar();
+  const key = np ? `${np.playing}|${np.prev}|${np.next}` : 'none';
+  if (!force && key === thumbKey) return;
+  thumbKey = key;
+  const buttons = np ? [
+    { tooltip: 'Précédent', icon: thumbIcon('prev'), flags: np.prev ? [] : ['disabled'], click: () => mediaAction('previoustrack') },
+    { tooltip: np.playing ? 'Pause' : 'Lecture', icon: thumbIcon(np.playing ? 'pause' : 'play'), click: () => mediaAction('toggle') },
+    { tooltip: 'Suivant', icon: thumbIcon('next'), flags: np.next ? [] : ['disabled'], click: () => mediaAction('nexttrack') },
+  ] : [];
+  for (const h of hosts) {
+    if (h.win.isDestroyed() || typeof h.win.setThumbarButtons !== 'function') continue;
+    try { h.win.setThumbarButtons(buttons); } catch {}
+  }
+}
 
 // ------------------------------------------------------------------
 // Fenêtre Playlists : lire, transférer, sauvegarder
@@ -1056,7 +1129,7 @@ process.on('uncaughtException', err => log(`Exception non gérée : ${err.stack 
 // Accès interne pour les tests automatiques uniquement.
 if (process.env.PLATINE_TEST) {
   global.__platineTest = {
-    open, detach, attach, closeTab, setTabsMode, poll, goHome, leaveHome, goBack, goForward,
+    open, detach, attach, closeTab, setTabsMode, poll, goHome, leaveHome, goBack, goForward, reloadActive, mediaAction, npForBar,
     hosts: () => [...hosts], main: () => mainHost, tabs: allTabs, nowTab: () => nowTab, state: () => state,
   };
 }

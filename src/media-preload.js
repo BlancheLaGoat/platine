@@ -85,6 +85,14 @@ if (adskip && isTwitch) webFrame.executeJavaScript(`(() => {
 })();`);
 
 // ---------------- Anti-pub YouTube ----------------
+// La page signale où se trouve le bouton « Passer » ; Platine y fait un vrai clic de souris
+// (YouTube ignore parfois les clics simulés par script).
+if (adskip && isYouTube) {
+  window.addEventListener('message', e => {
+    const d = e.source === window && e.data && e.data.__platineYtSkip;
+    if (d && typeof d.x === 'number' && typeof d.y === 'number') ipcRenderer.send('platine:yt-skip', { x: d.x, y: d.y });
+  });
+}
 if (adskip && isYouTube) webFrame.executeJavaScript(`(() => {
   if (window.__platineAdskip) return;
   window.__platineAdskip = true;
@@ -110,8 +118,19 @@ if (adskip && isYouTube) webFrame.executeJavaScript(`(() => {
   if (document.documentElement) addStyle();
   document.addEventListener('DOMContentLoaded', addStyle);
 
-  const SKIP = '.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-slot button, .ytp-ad-skip-button-container button';
-  let inAd = false, saved = null;
+  const SKIP = [
+    '.ytp-skip-ad-button', '.ytp-ad-skip-button', '.ytp-ad-skip-button-modern', '.ytp-ad-skip-button-slot button',
+    '.ytp-ad-skip-button-container button', '[id^="skip-button"] button', '.ytp-skip-ad button', 'button[class*="skip-ad"]',
+  ].join(',');
+  let inAd = false, saved = null, lastTrusted = 0;
+
+  // bouton « Passer » réellement visible et cliquable
+  const visibleSkip = () => [...document.querySelectorAll(SKIP)].find(b => {
+    const r = b.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return false;
+    const st = getComputedStyle(b);
+    return st.visibility !== 'hidden' && st.display !== 'none' && +st.opacity > 0.05 && r.bottom > 0 && r.top < innerHeight;
+  });
 
   setInterval(() => {
     const player = document.querySelector('.html5-video-player.ad-showing, .html5-video-player.ad-interrupting')
@@ -125,7 +144,16 @@ if (adskip && isYouTube) webFrame.executeJavaScript(`(() => {
       if (!v.muted) v.muted = true;
       if (v.playbackRate !== 16) { try { v.playbackRate = 16; } catch (e) {} }
       if (v.paused && v.readyState > 2) v.play().catch(() => {});
-      document.querySelectorAll(SKIP).forEach(b => { try { b.click(); } catch (e) {} });
+      const btn = visibleSkip();
+      if (btn) {
+        try { btn.click(); } catch (e) {}
+        // vrai clic de souris, au plus une fois toutes les 0,7 s
+        if (Date.now() - lastTrusted > 700) {
+          lastTrusted = Date.now();
+          const r = btn.getBoundingClientRect();
+          window.postMessage({ __platineYtSkip: { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } }, '*');
+        }
+      }
     } else if (inAd) {
       inAd = false;
       if (v && saved) {

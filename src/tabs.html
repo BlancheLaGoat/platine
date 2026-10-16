@@ -45,6 +45,25 @@
   .nav:first-child { margin-left: 2px; }
   .nav:hover:not(:disabled) { background: #ffffff14; color: var(--text); }
   .nav:disabled { opacity: .3; cursor: default; }
+  /* lecteur compact à droite */
+  #np { display: none; align-items: center; gap: 2px; min-width: 0; max-width: 340px; margin-right: 4px; }
+  #np.show { display: flex; }
+  #np .info {
+    min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 0 8px 0 6px; cursor: pointer;
+    border-radius: 7px; line-height: 1.15;
+  }
+  #np .info:hover { background: #ffffff0c; }
+  #np .t { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  #np .a { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  #np .a b { color: var(--npaccent); font-weight: 600; }
+  #np .mb {
+    flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    background: none; border: 0; color: var(--text); cursor: pointer;
+  }
+  #np .mb:hover:not(:disabled) { background: #ffffff16; }
+  #np .mb:disabled { opacity: .3; cursor: default; }
+  #np .mb.play { width: 30px; height: 30px; background: var(--npaccent); color: #0b0b0d; }
+  #np .mb.play:hover { filter: brightness(1.12); background: var(--npaccent); }
   #home {
     align-self: center; flex: none; display: flex; align-items: center; gap: 7px;
     height: 30px; padding: 0 10px; margin: 0 4px 0 2px; border-radius: 8px;
@@ -68,6 +87,21 @@
 <body>
   <div id="tabs"></div>
   <div id="right">
+    <div id="np">
+      <button class="mb" id="npPrev" title="Précédent">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>
+      </button>
+      <button class="mb play" id="npToggle" title="Lecture / pause">
+        <svg id="npIco" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="mb" id="npNext" title="Suivant">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5l11 7-11 7z"/></svg>
+      </button>
+      <div class="info" id="npInfo" title="Aller à l'onglet qui joue">
+        <span class="t" id="npTitle"></span>
+        <span class="a" id="npArtist"></span>
+      </div>
+    </div>
     <span class="hint" id="hint"></span>
     <button id="attachAll" title="Remettre cet onglet dans la fenêtre principale">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 14l-5-5 5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
@@ -82,6 +116,7 @@
   const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>';
   const ICON_BACK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>';
   const ICON_FWD = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+  const ICON_RELOAD = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>';
   const ICON_HOME = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>';
   let st = { tabs: [], active: null, main: true, tabsMode: false };
 
@@ -102,7 +137,12 @@
     fwd.className = 'nav'; fwd.innerHTML = ICON_FWD; fwd.disabled = !nav.forward;
     fwd.title = 'Suivant (Alt+→)';
     fwd.onclick = () => window.tabs.forward();
-    box.append(back, fwd);
+    const rl = document.createElement('button');
+    rl.className = 'nav'; rl.innerHTML = ICON_RELOAD; rl.id = 'reload';
+    rl.disabled = !(activeTabOf() && !activeTabOf().picker);
+    rl.title = 'Actualiser la page (F5)';
+    rl.onclick = () => window.tabs.reload();
+    box.append(back, fwd, rl);
 
     // bouton Accueil : écran de choix, sans fermer ce qui joue
     const activeTab = st.tabs.find(t => t.key === st.active);
@@ -208,7 +248,30 @@
   }
 
   $('attachAll').onclick = () => { const a = st.tabs.find(t => t.key === st.active) || st.tabs[0]; if (a) window.tabs.attach(a.key); };
-  window.tabs.onState(s => { st = s; render(); });
+  function activeTabOf() { return st.tabs.find(t => t.key === st.active); }
+
+  // lecteur compact : morceau en cours (n'importe quel onglet) + précédent / pause / suivant
+  const PLAY_PATH = '<path d="M8 5v14l11-7z"/>', PAUSE_PATH = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+  function renderNp() {
+    const np = st.np;
+    $('np').classList.toggle('show', !!np);
+    if (!np) return;
+    document.documentElement.style.setProperty('--npaccent', np.accent || '#33ffee');
+    $('npTitle').textContent = np.title;
+    $('npArtist').innerHTML = '';
+    const pf = document.createElement('b'); pf.textContent = np.platform;
+    $('npArtist').append(pf, document.createTextNode(np.artist ? ' · ' + np.artist : ''));
+    $('npIco').innerHTML = np.playing ? PAUSE_PATH : PLAY_PATH;
+    $('npToggle').title = np.playing ? 'Pause' : 'Lecture';
+    $('npPrev').disabled = !np.prev;
+    $('npNext').disabled = !np.next;
+  }
+  $('npPrev').onclick = () => window.tabs.media('previoustrack');
+  $('npToggle').onclick = () => window.tabs.media('toggle');
+  $('npNext').onclick = () => window.tabs.media('nexttrack');
+  $('npInfo').onclick = () => window.tabs.showPlaying();
+
+  window.tabs.onState(s => { st = s; render(); renderNp(); });
 </script>
 </body>
 </html>
